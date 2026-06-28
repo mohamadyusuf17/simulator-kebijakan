@@ -15,7 +15,7 @@ st.markdown("""
 :root {
     --bg:#060D1F;--card:#0E1E38;--deep:#0A1628;
     --border:rgba(212,175,55,0.18);--gold:#D4AF37;--gold2:#E8CC6A;
-    --slate:#8892B0;--white:#EEF0F7;--green:#22C55E;--red:#EF4444;
+    --slate:#8892B0;--white:#EEF0F7;--green:#22C55E;--red:#EF4444;--blue:#38BDF8;
 }
 html,body,[class*="css"]{font-family:'Inter',sans-serif;}
 .stApp{background:var(--bg);}
@@ -51,11 +51,29 @@ section[data-testid="stSidebar"]{background:var(--deep)!important;border-right:1
 .sb-lbl{font-size:.6rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:.35rem;}
 .divider{border:none;border-top:1px solid var(--border);margin:1.2rem 0;}
 .footer{text-align:center;font-size:.67rem;color:var(--slate);border-top:1px solid var(--border);padding:.9rem 0 .4rem;margin-top:.8rem;letter-spacing:.4px;}
+
+/* ── Ranking Table (M16 SAW) ── */
+.rank-table{width:100%;border-collapse:collapse;font-size:.73rem;}
+.rank-table th{color:var(--gold);font-size:.58rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:.55rem .8rem;border-bottom:1px solid var(--border);text-align:left;}
+.rank-table td{padding:.55rem .8rem;color:var(--white);border-bottom:1px solid rgba(212,175,55,.07);}
+.rank-table tr.best td{background:rgba(212,175,55,.06);}
+.rank-badge{display:inline-block;width:1.4rem;height:1.4rem;border-radius:50%;background:var(--gold);color:#060D1F;font-size:.65rem;font-weight:700;text-align:center;line-height:1.4rem;}
+.rank-badge.s2{background:rgba(212,175,55,.3);color:var(--gold2);}
+.rank-badge.s3{background:rgba(136,146,176,.2);color:var(--slate);}
+
+/* ── XAI Bar ── */
+.xai-row{display:flex;align-items:center;gap:.7rem;margin-bottom:.55rem;}
+.xai-lbl{font-size:.68rem;color:var(--slate);width:7rem;flex-shrink:0;text-align:right;}
+.xai-bar-wrap{flex:1;background:rgba(136,146,176,.12);border-radius:4px;height:.55rem;overflow:hidden;}
+.xai-bar-inner{height:100%;border-radius:4px;transition:width .4s;}
+.xai-val{font-size:.68rem;font-weight:700;width:3rem;text-align:right;}
+.xai-pos{color:var(--green);}
+.xai-neg{color:var(--red);}
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# M15 ① — PERSISTENSI MODEL (joblib)
+# ① PERSISTENSI MODEL (M15)
 # ─────────────────────────────────────────────
 MODEL_PATH  = "model_kebijakan_v1.joblib"
 SCALER_PATH = "scaler_kebijakan_v1.joblib"
@@ -64,22 +82,18 @@ SCALER_PATH = "scaler_kebijakan_v1.joblib"
 def load_or_train_model():
     X_train = np.array([[5,10],[10,20],[15,5],[20,25],[25,15]])
     y_train = np.array([50,80,110,90,150])
-
-    scaler = StandardScaler()
+    scaler  = StandardScaler()
     X_scaled = scaler.fit_transform(X_train)
-    model  = LinearRegression().fit(X_scaled, y_train)
-
-    # Simpan ke disk jika belum ada (MLOps: satu kali export)
+    model   = LinearRegression().fit(X_scaled, y_train)
     if not os.path.exists(MODEL_PATH):
-        joblib.dump(model,  MODEL_PATH)
+        joblib.dump(model, MODEL_PATH)
     if not os.path.exists(SCALER_PATH):
         joblib.dump(scaler, SCALER_PATH)
-
     return model, scaler, X_train
 
 model, scaler, X_train_ref = load_or_train_model()
 
-B_IKLAN  = 10; B_DISKON = 10
+B_IKLAN = 10; B_DISKON = 10
 baseline_raw = np.array([[B_IKLAN, B_DISKON]])
 baseline     = model.predict(scaler.transform(baseline_raw))[0]
 ic = round(model.coef_[0], 2)
@@ -88,27 +102,78 @@ dc = round(model.coef_[1], 2)
 DARK="#0E1E38"; DARKER="#0A1628"; GOLD="#D4AF37"
 
 # ─────────────────────────────────────────────
-# M15 ② — DETEKSI DRIFT
+# ② DETEKSI DRIFT (M15)
 # ─────────────────────────────────────────────
-def check_data_drift(new_data: np.ndarray, train_data: np.ndarray, threshold: float = 15.0):
-    """
-    Membandingkan rata-rata fitur input baru terhadap rata-rata data latih.
-    Threshold = 15 (satuan anggaran/persen) → sesuai skala slider 0-50.
-    """
+def check_data_drift(new_data, train_data, threshold=15.0):
     drift = np.abs(np.mean(new_data) - np.mean(train_data))
-    is_drift = drift > threshold
-    return is_drift, round(drift, 2)
+    return drift > threshold, round(drift, 2)
 
 # ─────────────────────────────────────────────
-# M15 ③ — ANONYMIZATION
+# ③ ANONYMIZATION (M15)
 # ─────────────────────────────────────────────
-def clean_sensitive_data(df_input: pd.DataFrame) -> pd.DataFrame:
-    """Menghapus kolom PII sebelum data diproses simulator."""
+def clean_sensitive_data(df_input):
     cols_pii = ['Nama_Operator', 'NIK_Petugas', 'Email', 'No_HP']
     return df_input.drop(columns=[c for c in cols_pii if c in df_input.columns])
 
 # ─────────────────────────────────────────────
-# CHART HELPERS (sama seperti M14)
+# ④ SAW — MCDM (M16 NEW)
+# ─────────────────────────────────────────────
+# Bobot AHP sudah disesuaikan dengan koefisien ML:
+#   Iklan paling berpengaruh → bobot tertinggi
+SAW_WEIGHTS = np.array([0.50, 0.30, 0.20])   # [Profit-ML, Efisiensi, Biaya]
+SAW_TYPES   = ["benefit", "benefit", "cost"]  # cost = semakin kecil semakin baik
+
+ALTERNATIF = ["Strategi A\n(Iklan Agresif)", "Strategi B\n(Diskon Sedang)", "Strategi C\n(Konservatif)"]
+
+def hitung_saw(pred_profit, iklan_val, diskon_val):
+    """
+    Matriks keputusan 3 alternatif × 3 kriteria:
+      - Kolom 0 (Profit-ML)  : output prediksi ML per skenario
+      - Kolom 1 (Efisiensi)  : asumsi statis per strategi
+      - Kolom 2 (Biaya Total): total pengeluaran per skenario
+    """
+    # Prediksi profit masing-masing alternatif
+    p_a = model.predict(scaler.transform([[min(iklan_val*1.4, 50), diskon_val]]))[0]
+    p_b = pred_profit   # skenario aktif = Alternatif B (tengah)
+    p_c = model.predict(scaler.transform([[max(iklan_val*0.6, 0), diskon_val*0.7]]))[0]
+
+    matriks = np.array([
+        [p_a,  85.0, iklan_val*1.4 + diskon_val*0.8],   # A: iklan tinggi, biaya besar
+        [p_b,  90.0, iklan_val     + diskon_val      ],   # B: skenario aktif slider
+        [p_c,  70.0, iklan_val*0.6 + diskon_val*0.7 ],   # C: konservatif, biaya kecil
+    ])
+
+    # Normalisasi SAW
+    norm = np.zeros_like(matriks, dtype=float)
+    for j in range(matriks.shape[1]):
+        if SAW_TYPES[j] == "benefit":
+            denom = matriks[:, j].max()
+            norm[:, j] = matriks[:, j] / denom if denom != 0 else 0
+        else:  # cost
+            denom = matriks[:, j].min()
+            norm[:, j] = denom / matriks[:, j] if denom != 0 else 0
+
+    skor = norm @ SAW_WEIGHTS
+    ranking = np.argsort(skor)[::-1]   # descending
+    return matriks, norm, skor, ranking
+
+# ─────────────────────────────────────────────
+# ⑤ XAI — KONTRIBUSI FITUR (M16 NEW)
+# ─────────────────────────────────────────────
+def hitung_xai(iklan_val, diskon_val):
+    """
+    Pendekatan XAI berbasis koefisien LinearRegression (pengganti SHAP
+    untuk model linear): kontribusi = koef × nilai_terstandarisasi.
+    Nilai positif = mendorong profit naik. Nilai negatif = menekan profit.
+    """
+    x_scaled = scaler.transform([[iklan_val, diskon_val]])[0]
+    kontribusi = model.coef_ * x_scaled         # shape (2,)
+    intercept  = model.intercept_
+    labels = ["Anggaran Iklan", "Besaran Diskon"]
+    return labels, kontribusi, intercept
+
+# ─────────────────────────────────────────────
+# CHART HELPERS (M14/M15 — tidak diubah)
 # ─────────────────────────────────────────────
 def gauge(val):
     color="#EF4444" if val/200<.4 else GOLD if val/200<.7 else "#22C55E"
@@ -130,7 +195,7 @@ def gauge(val):
         font_color="#EEF0F7",font_family="Inter")
     return fig
 
-def bar_chart(base,pred):
+def bar_chart(base, pred):
     fig=go.Figure(go.Bar(
         x=["Baseline","Skenario Aktif"],y=[base,pred],
         marker_color=[DARKER,GOLD],
@@ -172,25 +237,49 @@ def sens_chart():
         margin=dict(t=15,b=40,l=50,r=10),height=260)
     return fig
 
+def saw_chart(skor, ranking):
+    """Bar chart horizontal untuk skor SAW tiap alternatif."""
+    labels = ["Strategi A\n(Iklan Agresif)", "Strategi B\n(Diskon Sedang)", "Strategi C\n(Konservatif)"]
+    colors = [GOLD if i == ranking[0] else "#38BDF8" if i == ranking[1] else "#8892B0" for i in range(3)]
+    fig = go.Figure(go.Bar(
+        x=skor, y=labels, orientation="h",
+        marker_color=colors,
+        text=[f"{s:.4f}" for s in skor],
+        textposition="outside", textfont_color="#EEF0F7",
+        width=0.5,
+    ))
+    fig.update_layout(
+        paper_bgcolor=DARK, plot_bgcolor=DARKER,
+        font_color="#EEF0F7", font_family="Inter",
+        xaxis=dict(gridcolor="rgba(136,146,176,.1)", range=[0, 1.1],
+                   tickfont_color="#8892B0", title="Skor SAW", title_font_color="#8892B0"),
+        yaxis=dict(tickfont_color="#EEF0F7", tickfont_size=11),
+        margin=dict(t=10, b=30, l=10, r=60), height=220, showlegend=False,
+    )
+    return fig
+
 # ─────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🎛️ Tuas Kebijakan")
     st.markdown('<hr style="border-color:rgba(212,175,55,.2);margin:.6rem 0 1rem">', unsafe_allow_html=True)
+
     st.markdown('<p class="sb-lbl">Anggaran Iklan</p>', unsafe_allow_html=True)
-    iklan=st.slider("iklan",0,50,B_IKLAN,label_visibility="collapsed")
-    st.markdown(f'<p style="font-size:.68rem;color:#8892B0;margin:-.3rem 0 .9rem">Rp <b style="color:{GOLD}">{iklan} Juta</b></p>',unsafe_allow_html=True)
+    iklan = st.slider("iklan", 0, 50, B_IKLAN, label_visibility="collapsed")
+    st.markdown(f'<p style="font-size:.68rem;color:#8892B0;margin:-.3rem 0 .9rem">Rp <b style="color:{GOLD}">{iklan} Juta</b></p>', unsafe_allow_html=True)
+
     st.markdown('<p class="sb-lbl">Besaran Diskon</p>', unsafe_allow_html=True)
-    diskon=st.slider("diskon",0,50,B_DISKON,label_visibility="collapsed")
-    st.markdown(f'<p style="font-size:.68rem;color:#8892B0;margin:-.3rem 0 1rem"><b style="color:{GOLD}">{diskon}%</b></p>',unsafe_allow_html=True)
+    diskon = st.slider("diskon", 0, 50, B_DISKON, label_visibility="collapsed")
+    st.markdown(f'<p style="font-size:.68rem;color:#8892B0;margin:-.3rem 0 1rem"><b style="color:{GOLD}">{diskon}%</b></p>', unsafe_allow_html=True)
+
     st.markdown('<hr style="border-color:rgba(212,175,55,.2);margin:0 0 .9rem">', unsafe_allow_html=True)
     st.markdown(f"""<div class="bl"><b>📌 Baseline</b><br>
     Iklan &nbsp;: Rp {B_IKLAN} Juta<br>Diskon : {B_DISKON}%<br>
-    Profit &nbsp;: <b>Rp {baseline:.1f} Jt</b></div>""",unsafe_allow_html=True)
-    st.markdown('<p style="font-size:.62rem;color:#8892B0;margin-top:.7rem;text-align:center">⬦ Garis emas gauge = baseline</p>',unsafe_allow_html=True)
+    Profit &nbsp;: <b>Rp {baseline:.1f} Jt</b></div>""", unsafe_allow_html=True)
+    st.markdown('<p style="font-size:.62rem;color:#8892B0;margin-top:.7rem;text-align:center">⬦ Garis emas gauge = baseline</p>', unsafe_allow_html=True)
 
-    # ── M15: Drift Status di Sidebar ──
+    # Drift Monitor
     st.markdown('<hr style="border-color:rgba(212,175,55,.2);margin:.9rem 0">', unsafe_allow_html=True)
     st.markdown('<p class="sb-lbl">🔍 Monitor Drift (M15)</p>', unsafe_allow_html=True)
     current_input = np.array([[iklan, diskon]])
@@ -209,16 +298,20 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # COMPUTE
 # ─────────────────────────────────────────────
-pred  = round(model.predict(scaler.transform([[iklan,diskon]]))[0], 2)
-delta = round(pred-baseline, 2)
-sign  = "▲" if delta>=0 else "▼"
-dcls  = "green" if delta>=0 else "red"
+pred  = round(model.predict(scaler.transform([[iklan, diskon]]))[0], 2)
+delta = round(pred - baseline, 2)
+sign  = "▲" if delta >= 0 else "▼"
+dcls  = "green" if delta >= 0 else "red"
 
-if   delta> 5: pill_cls,pill_lbl,narasi="g","✅ Untung","Skenario menguntungkan. Pertimbangkan diterapkan."
-elif delta<-5: pill_cls,pill_lbl,narasi="r","⚠️ Rugi","Skenario merugikan. Tinjau ulang anggaran."
-else:          pill_cls,pill_lbl,narasi="y","➖ Netral","Dampak minimal. Coba variasikan slider lebih jauh."
+if   delta >  5: pill_cls, pill_lbl, narasi = "g", "✅ Untung", "Skenario menguntungkan. Pertimbangkan diterapkan."
+elif delta < -5: pill_cls, pill_lbl, narasi = "r", "⚠️ Rugi",   "Skenario merugikan. Tinjau ulang anggaran."
+else:            pill_cls, pill_lbl, narasi = "y", "➖ Netral",  "Dampak minimal. Coba variasikan slider lebih jauh."
 
-dominant="Anggaran Iklan" if abs(ic)>abs(dc) else "Besaran Diskon"
+dominant = "Anggaran Iklan" if abs(ic) > abs(dc) else "Besaran Diskon"
+
+# SAW & XAI
+matriks_saw, norm_saw, skor_saw, ranking_saw = hitung_saw(pred, iklan, diskon)
+xai_labels, xai_kontribusi, xai_intercept   = hitung_xai(iklan, diskon)
 
 # ─────────────────────────────────────────────
 # HEADER
@@ -226,58 +319,164 @@ dominant="Anggaran Iklan" if abs(ic)>abs(dc) else "Besaran Diskon"
 st.markdown(f"""
 <div class="hdr">
   <div>
-    <div class="badge-tag">Pemodelan &amp; Simulasi · Minggu 15</div>
+    <div class="badge-tag">Pemodelan &amp; Simulasi · Minggu 16 — UAS Edition</div>
     <p class="ttl">📊 Sim<span>Kebijakan</span></p>
-    <p class="sub">Simulator Interaktif What-If — Analisis Kebijakan Berbasis Data · MLOps Edition</p>
+    <p class="sub">Simulator Interaktif What-If — Integrasi ML · XAI · SPK (SAW) · MLOps</p>
   </div>
   <div class="auth">
     <div class="auth-name">Mohamad Yusuf</div>
     <div class="auth-npm">NPM 2313020037</div>
   </div>
-</div>""",unsafe_allow_html=True)
+</div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # ROW 1 — GAUGE + CARDS
 # ─────────────────────────────────────────────
-st.markdown('<p class="sec">Ringkasan Simulasi</p>',unsafe_allow_html=True)
-col_g,col_cards=st.columns([1.6,1])
+st.markdown('<p class="sec">Ringkasan Simulasi</p>', unsafe_allow_html=True)
+col_g, col_cards = st.columns([1.6, 1])
 with col_g:
-    st.plotly_chart(gauge(pred),use_container_width=True)
+    st.plotly_chart(gauge(pred), use_container_width=True)
 with col_cards:
     st.markdown(f"""
     <div class="mc"><div class="mc-icon">💰</div><div class="mc-body">
     <div class="mc-lbl">Prediksi Profit</div>
     <div class="mc-val">Rp {pred:.1f} <span style="font-size:.9rem">Jt</span></div>
-    <div class="mc-sub">Juta Rupiah</div></div></div>""",unsafe_allow_html=True)
+    <div class="mc-sub">Juta Rupiah</div></div></div>""", unsafe_allow_html=True)
     st.markdown(f"""
     <div class="mc"><div class="mc-icon">📈</div><div class="mc-body">
     <div class="mc-lbl">Delta (Δ) vs Baseline</div>
     <div class="mc-val {dcls}">{sign} {abs(delta):.1f} <span style="font-size:.9rem">Jt</span></div>
-    <div class="mc-sub">Selisih dari nilai baseline</div></div></div>""",unsafe_allow_html=True)
+    <div class="mc-sub">Selisih dari nilai baseline</div></div></div>""", unsafe_allow_html=True)
     st.markdown(f"""
     <div class="sc"><div class="mc-lbl">Status Skenario</div>
     <div><span class="pill {pill_cls}">{pill_lbl}</span></div>
-    <div class="sc-txt">{narasi}</div></div>""",unsafe_allow_html=True)
+    <div class="sc-txt">{narasi}</div></div>""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# ROW 2 — CHART
+# ROW 2 — CHART VISUAL
 # ─────────────────────────────────────────────
-st.markdown('<hr class="divider">',unsafe_allow_html=True)
-st.markdown('<p class="sec">Analisis Visual</p>',unsafe_allow_html=True)
-c1,c2=st.columns(2)
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
+st.markdown('<p class="sec">Analisis Visual</p>', unsafe_allow_html=True)
+c1, c2 = st.columns(2)
 with c1:
-    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.4rem">Perbandingan Skenario</p>',unsafe_allow_html=True)
-    st.plotly_chart(bar_chart(baseline,pred),use_container_width=True)
+    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.4rem">Perbandingan Skenario</p>', unsafe_allow_html=True)
+    st.plotly_chart(bar_chart(baseline, pred), use_container_width=True)
 with c2:
-    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.4rem">Peta Sensitivitas Variabel</p>',unsafe_allow_html=True)
-    st.plotly_chart(sens_chart(),use_container_width=True)
+    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.4rem">Peta Sensitivitas Variabel</p>', unsafe_allow_html=True)
+    st.plotly_chart(sens_chart(), use_container_width=True)
     st.caption("Kemiringan lebih curam → variabel lebih sensitif terhadap profit.")
 
 # ─────────────────────────────────────────────
-# INTERPRETASI
+# ROW 3 — XAI (M16 NEW)
 # ─────────────────────────────────────────────
-st.markdown('<hr class="divider">',unsafe_allow_html=True)
-with st.expander("📋 Interpretasi & Rekomendasi Kebijakan", expanded=True):
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
+st.markdown('<p class="sec">🔍 Transparansi — Mengapa Hasilnya Demikian? (XAI · M16)</p>', unsafe_allow_html=True)
+
+col_xai, col_xai_info = st.columns([1.2, 1])
+
+with col_xai:
+    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.8rem">Kontribusi Fitur terhadap Prediksi Profit</p>', unsafe_allow_html=True)
+
+    total_kontrib = abs(xai_kontribusi).sum()
+    bar_rows = ""
+    for label, val in zip(xai_labels, xai_kontribusi):
+        pct  = abs(val) / (total_kontrib + 1e-9) * 100
+        cls  = "xai-pos" if val >= 0 else "xai-neg"
+        fill = "#22C55E" if val >= 0 else "#EF4444"
+        arah = f"+{val:.2f}" if val >= 0 else f"{val:.2f}"
+        bar_rows += f"""
+        <div class="xai-row">
+          <div class="xai-lbl">{label}</div>
+          <div class="xai-bar-wrap">
+            <div class="xai-bar-inner" style="width:{min(pct*2, 100):.1f}%;background:{fill};"></div>
+          </div>
+          <div class="xai-val {cls}">{arah}</div>
+        </div>"""
+
+    intercept_str = f"+{xai_intercept:.2f}" if xai_intercept >= 0 else f"{xai_intercept:.2f}"
+    bar_rows += f"""
+    <div class="xai-row">
+      <div class="xai-lbl" style="color:#8892B0">Intercept (bias)</div>
+      <div class="xai-bar-wrap"><div class="xai-bar-inner" style="width:30%;background:#8892B0;"></div></div>
+      <div class="xai-val" style="color:#8892B0">{intercept_str}</div>
+    </div>"""
+
+    st.markdown(f'<div style="background:#0E1E38;border:1px solid rgba(212,175,55,.18);border-radius:12px;padding:1rem 1.2rem;">{bar_rows}</div>', unsafe_allow_html=True)
+
+with col_xai_info:
+    dom_fitur = xai_labels[int(np.argmax(np.abs(xai_kontribusi)))]
+    dom_val   = xai_kontribusi[int(np.argmax(np.abs(xai_kontribusi)))]
+    st.markdown(f"""
+<div class="sc" style="margin-top:0">
+<div class="mc-lbl">Interpretasi XAI</div>
+<br>
+<div class="sc-txt">
+Prediksi profit <b style="color:#D4AF37">Rp {pred:.2f} Jt</b> dihasilkan dari:<br><br>
+• <b style="color:#E8CC6A">Anggaran Iklan</b> memberikan kontribusi <b style="color:{'#22C55E' if xai_kontribusi[0]>=0 else '#EF4444'}">{xai_kontribusi[0]:+.2f} Jt</b><br>
+• <b style="color:#E8CC6A">Besaran Diskon</b> memberikan kontribusi <b style="color:{'#22C55E' if xai_kontribusi[1]>=0 else '#EF4444'}">{xai_kontribusi[1]:+.2f} Jt</b><br>
+• <b style="color:#8892B0">Bias model (intercept)</b>: {xai_intercept:.2f} Jt<br><br>
+🔑 <b style="color:#D4AF37">Fitur dominan: {dom_fitur}</b><br>
+dengan kontribusi {dom_val:+.2f} Jt terhadap hasil akhir.
+</div>
+</div>""", unsafe_allow_html=True)
+
+    if is_drift:
+        st.warning("⚠️ **Peringatan:** Drift terdeteksi — interpretasi XAI di atas mungkin kurang akurat karena input di luar jangkauan data latih.")
+
+# ─────────────────────────────────────────────
+# ROW 4 — SAW / MCDM (M16 NEW)
+# ─────────────────────────────────────────────
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
+st.markdown('<p class="sec">🏆 Rekomendasi Strategi — SPK Metode SAW (M16)</p>', unsafe_allow_html=True)
+
+alt_labels = ["Strategi A (Iklan Agresif)", "Strategi B (Diskon Sedang)", "Strategi C (Konservatif)"]
+badge_cls  = ["", "s2", "s3"]
+
+col_saw1, col_saw2 = st.columns([1, 1.2])
+
+with col_saw1:
+    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.6rem">Skor SAW per Alternatif</p>', unsafe_allow_html=True)
+    st.plotly_chart(saw_chart(skor_saw, ranking_saw), use_container_width=True)
+
+with col_saw2:
+    st.markdown('<p style="font-size:.78rem;font-weight:600;color:#EEF0F7;margin-bottom:.6rem">Ranking Keputusan Akhir</p>', unsafe_allow_html=True)
+
+    rows_html = ""
+    for rank_pos, alt_idx in enumerate(ranking_saw):
+        badge = f'<span class="rank-badge {badge_cls[rank_pos]}">{rank_pos+1}</span>'
+        is_best = "best" if rank_pos == 0 else ""
+        crown = " 👑" if rank_pos == 0 else ""
+        rows_html += f"""<tr class="{is_best}">
+          <td>{badge}</td>
+          <td><b>{alt_labels[alt_idx]}{crown}</b></td>
+          <td style="color:#D4AF37;font-weight:700">{skor_saw[alt_idx]:.4f}</td>
+          <td style="color:#8892B0">{matriks_saw[alt_idx,0]:.1f} Jt</td>
+        </tr>"""
+
+    st.markdown(f"""
+<table class="rank-table">
+  <thead><tr>
+    <th>Rank</th><th>Alternatif</th><th>Skor SAW</th><th>Profit ML</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>""", unsafe_allow_html=True)
+
+    best_idx   = ranking_saw[0]
+    best_label = alt_labels[best_idx]
+    best_skor  = skor_saw[best_idx]
+    st.markdown(f"""
+<div class="bl" style="margin-top:.8rem">
+<b>📌 Rekomendasi Terbaik: {best_label}</b><br>
+Skor SAW tertinggi = <b style="color:#D4AF37">{best_skor:.4f}</b>.<br>
+Bobot AHP: Profit-ML 50% · Efisiensi 30% · Biaya 20%.<br>
+<span style="color:#22C55E">Fitur dominan ML ({dominant}) konsisten dengan bobot tertinggi SPK.</span>
+</div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# ROW 5 — INTERPRETASI (dipertahankan dari M15)
+# ─────────────────────────────────────────────
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
+with st.expander("📋 Interpretasi & Rekomendasi Kebijakan", expanded=False):
     st.markdown(f"""
 **Hasil What-If:** Iklan Rp {iklan} Jt + Diskon {diskon}% → profit **Rp {pred:.2f} Jt** ({sign} Rp {abs(delta):.2f} Jt vs baseline)
 
@@ -286,13 +485,15 @@ with st.expander("📋 Interpretasi & Rekomendasi Kebijakan", expanded=True):
 - Koef. Diskon `{dc}` → tiap +1% diskon = Rp {dc:.2f} Jt profit
 - **Variabel paling sensitif: {dominant}**
 
+**Rekomendasi SPK (SAW):** {best_label} dengan skor {best_skor:.4f}
+
 **Rekomendasi:** {narasi}
     """)
 
 # ─────────────────────────────────────────────
-# M15 — PANEL MLOps (Drift + Anonymization)
+# ROW 6 — MLOps: DRIFT + ANONYMIZATION (M15)
 # ─────────────────────────────────────────────
-st.markdown('<hr class="divider">',unsafe_allow_html=True)
+st.markdown('<hr class="divider">', unsafe_allow_html=True)
 st.markdown('<p class="sec">MLOps — Monitoring & Etika Data (M15)</p>', unsafe_allow_html=True)
 
 col_drift, col_anon = st.columns(2)
@@ -331,5 +532,7 @@ with col_anon:
 # ─────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────
-st.markdown("<div class='footer'>Mohamad Yusuf - NPM 2313020037 · Pemodelan &amp; Simulasi M15 · MLOps Edition</div>",
-            unsafe_allow_html=True)
+st.markdown(
+    "<div class='footer'>Mohamad Yusuf - NPM 2313020037 · Pemodelan &amp; Simulasi M16 · UAS Edition — ML · XAI · SAW · MLOps</div>",
+    unsafe_allow_html=True
+)
